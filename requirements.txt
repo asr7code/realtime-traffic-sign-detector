@@ -1,6 +1,6 @@
 streamlit>=1.22.0
-tensorflow>=2.10.0
+tensorflow-cpu>=2.10.0  # Lighter CPU-only version
 numpy>=1.23.0
-opencv-python-headless>=4.6.0
 Pillow>=9.3.0
-protobuf<4.0.0  # Required for TensorFlow compatibility
+protobuf<4.0.0
+h5py>=3.7.0  # Explicitly add h5py
