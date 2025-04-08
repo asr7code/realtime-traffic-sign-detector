@@ -1,64 +1,56 @@
 import streamlit as st
-from streamlit_webrtc import webrtc_streamer, VideoTransformerBase
-import av
 import tensorflow as tf
 import numpy as np
 import cv2
 import pickle
+from PIL import Image
+import io
 
-# Set Streamlit configuration first
-st.set_page_config(page_title="Real-Time Traffic Sign Detector", layout="centered")
-st.title("🚦 Real-Time Traffic Sign Recognition")
-st.markdown("Show a traffic sign in front of your webcam and it will recognize it!")
+st.set_page_config(page_title="Traffic Sign Detector", layout="centered")
 
-# Load the trained model from the .keras file with compile=False
-model = tf.keras.models.load_model("best_model.keras", compile=False)
+# Suppress TensorFlow warnings
+import os
+os.environ["TF_CPP_MIN_LOG_LEVEL"] = "2"
 
-# Load the label binarizer
-with open("label_binarizer.pkl", "rb") as f:
-    lb = pickle.load(f)
+# Load the trained model and label binarizer
+@st.cache_resource
+def load_model_and_labels():
+    try:
+        model = tf.keras.models.load_model("best_model.h5", compile=False)
+        with open("label_binarizer.pkl", "rb") as f:
+            lb = pickle.load(f)
+        return model, lb
+    except Exception as e:
+        st.error(f"Error loading model or labels: {e}")
+        return None, None
 
-# Define a video transformer that processes each frame
-class TrafficSignDetector(VideoTransformerBase):
-    def __init__(self):
-        self.result = None
-        self.last_label = None
+model, label_binarizer = load_model_and_labels()
 
-    def transform(self, frame: av.VideoFrame) -> av.VideoFrame:
-        img = frame.to_ndarray(format="bgr24")
-        # Adjust image size if needed (e.g., if your model was trained with a different size than (30,30))
-        img_resized = cv2.resize(img, (30, 30))
-        img_array = img_resized.astype("float32") / 255.0
-        img_input = np.expand_dims(img_array, axis=0)
+st.title("🚦 Real-Time Traffic Sign Classifier")
 
-        prediction = model.predict(img_input)
-        pred_idx = int(np.argmax(prediction))
-        label = lb.classes_[pred_idx]
-        confidence = prediction[0][pred_idx]
+uploaded_file = st.file_uploader("Upload a traffic sign image", type=["jpg", "jpeg", "png"])
 
-        self.result = f"{label} ({confidence*100:.2f}%)"
+if uploaded_file is not None:
+    # Display uploaded image
+    image = Image.open(uploaded_file)
+    st.image(image, caption="Uploaded Image", use_column_width=True)
 
-        cv2.putText(img, label, (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
+    # Preprocess the image for model
+    img_array = np.array(image.convert("RGB"))
+    img_resized = cv2.resize(img_array, (64, 64))
+    img_normalized = img_resized.astype("float32") / 255.0
+    img_expanded = np.expand_dims(img_normalized, axis=0)
 
-        if label != self.last_label:
-            self.last_label = label
-            st.components.v1.html(f"""
-                <script>
-                    var msg = new SpeechSynthesisUtterance("Caution! {label}");
-                    msg.lang = "en-US";
-                    msg.rate = 0.9;
-                    window.speechSynthesis.speak(msg);
-                </script>
-            """, height=0)
+    if model and label_binarizer:
+        try:
+            predictions = model.predict(img_expanded)
+            predicted_label = label_binarizer.classes_[np.argmax(predictions)]
+            confidence = np.max(predictions) * 100
 
-        return img
-
-webrtc_ctx = webrtc_streamer(
-    key="traffic-sign-detect",
-    video_transformer_factory=TrafficSignDetector,
-    media_stream_constraints={"video": True, "audio": False},
-    async_transform=True,
-)
-
-if webrtc_ctx.video_transformer and webrtc_ctx.video_transformer.result:
-    st.success(f"Detected Sign: {webrtc_ctx.video_transformer.result}")
+            st.success(f"Prediction: **{predicted_label}** with **{confidence:.2f}%** confidence.")
+        except Exception as e:
+            st.error(f"Prediction error: {e}")
+    else:
+        st.error("Model or label binarizer failed to load.")
+else:
+    st.info("Upload a JPG or PNG image of a traffic sign to classify it.")
