@@ -1,48 +1,55 @@
-import gradio as gr
-import numpy as np
+import streamlit as st
 import cv2
+import numpy as np
 import tensorflow as tf
 import pickle
-import pyttsx3
+from streamlit_webrtc import webrtc_streamer, VideoProcessorBase
+from PIL import Image
+import av
 
-# Load model and label binarizer
+# Load the trained model and label binarizer
 model = tf.keras.models.load_model("best_model.h5")
 with open("label_binarizer.pkl", "rb") as f:
     lb = pickle.load(f)
 
-# Text-to-speech engine
-engine = pyttsx3.init()
+# Voice alert using browser JS (only works online)
+def speak(label):
+    js_code = f'''
+        <script>
+            var msg = new SpeechSynthesisUtterance("{label}");
+            window.speechSynthesis.speak(msg);
+        </script>
+    '''
+    st.components.v1.html(js_code)
 
-# Resize and preprocess frame for prediction
-def preprocess(frame):
-    frame = cv2.resize(frame, (64, 64))
-    frame = frame.astype("float") / 255.0
-    frame = np.expand_dims(frame, axis=0)
-    return frame
+# Title
+st.set_page_config(page_title="Real-Time Traffic Sign Detection", layout="centered")
+st.title("🚦 Real-Time Traffic Sign Recognition")
+st.markdown("Show a traffic sign to your camera and it will recognize and speak the name!")
 
-# Predict traffic sign and speak
-def predict_and_alert(image):
-    image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-    preprocessed = preprocess(image_rgb)
-    prediction = model.predict(preprocessed)[0]
-    class_index = np.argmax(prediction)
-    class_label = lb.classes_[class_index]
+# Define the video processor
+class VideoProcessor(VideoProcessorBase):
+    def __init__(self):
+        self.last_label = None
 
-    # Voice alert
-    engine.say(f"Traffic Sign: {class_label}")
-    engine.runAndWait()
+    def recv(self, frame: av.VideoFrame) -> av.VideoFrame:
+        img = frame.to_ndarray(format="bgr24")
+        img_resized = cv2.resize(img, (30, 30)) / 255.0
+        img_expanded = np.expand_dims(img_resized, axis=0)
 
-    # Return label for display
-    return f"Detected: {class_label}"
+        preds = model.predict(img_expanded)
+        pred_idx = np.argmax(preds)
+        label = lb.classes_[pred_idx]
 
-# Gradio Interface
-iface = gr.Interface(
-    fn=predict_and_alert,
-    inputs=gr.Image(source="webcam", streaming=True),
-    outputs="text",
-    title="Real-Time Traffic Sign Detector with Voice Alert",
-    live=True,
-)
+        # Show prediction on the video frame
+        cv2.putText(img, f"{label}", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
 
-if __name__ == "__main__":
-    iface.launch()
+        # Only speak if the label changed
+        if label != self.last_label:
+            self.last_label = label
+            speak(label)
+
+        return av.VideoFrame.from_ndarray(img, format="bgr24")
+
+# Start webcam stream
+webrtc_streamer(key="traffic-detect", video_processor_factory=VideoProcessor)
