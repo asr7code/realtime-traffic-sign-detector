@@ -3,5 +3,5 @@ streamlit-webrtc
 opencv-python
 tensorflow
 numpy
-pyttsx3 ; only works locally
+pyttsx3 
 Pillow
