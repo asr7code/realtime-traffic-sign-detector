@@ -2,36 +2,52 @@ import streamlit as st
 import numpy as np
 import tensorflow as tf
 from PIL import Image
-import cv2
+import os
 import time
-from threading import Thread
-import queue
 
 # 🚦 Page Config
 st.set_page_config(page_title="Traffic Sign Alert", layout="centered")
 
-# 📌 Class Labels (same as your original)
+# 📌 Class Labels (reduced for example - include all your classes)
 CLASS_LABELS = {
-    0: "Speed limit 20 km per hour",
-    # ... (keep all your existing labels)
-    42: "End of no passing by vehicles over 3.5 tons"
+    0: "Speed limit 20 km/h",
+    1: "Speed limit 30 km/h",
+    2: "Speed limit 50 km/h",
+    # ... include all your classes
 }
 
-# 📦 Model Loading
+# 📦 Model Loading with error handling
 @st.cache_resource
 def load_model():
-    return tf.keras.models.load_model('best_model.h5')
+    try:
+        # Verify file exists
+        if not os.path.exists('best_model.h5'):
+            st.error("Model file not found!")
+            return None
+            
+        # Load with explicit file handling
+        with open('best_model.h5', 'rb') as f:
+            model = tf.keras.models.load_model(f)
+        st.success("Model loaded successfully!")
+        return model
+    except Exception as e:
+        st.error(f"Error loading model: {str(e)}")
+        return None
 
 model = load_model()
 
 # 🖼️ Image Processing
 def preprocess_image(image):
-    image = np.array(image.convert('RGB'))
-    image = cv2.resize(image, (64, 64))
-    image = image.astype('float32') / 255.0
-    return np.expand_dims(image, axis=0)
+    try:
+        image = np.array(image.convert('RGB'))
+        image = tf.image.resize(image, [64, 64])  # Using TensorFlow resize
+        image = image / 255.0
+        return np.expand_dims(image, axis=0)
+    except Exception as e:
+        st.error(f"Image processing error: {str(e)}")
+        return None
 
-# 🗣️ Browser-Based Voice Alert
+# 🗣️ Voice Alert
 def voice_alert(text):
     js = f"""
     <script>
@@ -43,58 +59,48 @@ def voice_alert(text):
     """
     st.components.v1.html(js, height=0)
 
-# 📹 Webcam Capture (for browsers that support it)
-def get_webcam_frame():
-    img_file_buffer = st.camera_input("Take a picture of traffic sign")
-    if img_file_buffer is not None:
-        return Image.open(img_file_buffer)
-    return None
-
-# 🎚️ Confidence Threshold
-CONFIDENCE_THRESHOLD = 0.85
-
-# 🖥️ Main UI
+# 🖥️ Main App
 def main():
     st.title("🚦 Traffic Sign Recognition")
-    st.write("Upload an image or use your camera to detect traffic signs")
     
-    tab1, tab2 = st.tabs(["📁 Upload Image", "📷 Use Camera"])
-    
-    with tab1:
-        uploaded_file = st.file_uploader("Choose traffic sign image", type=["jpg", "jpeg", "png"])
+    if model is None:
+        st.error("Failed to load model. Cannot proceed.")
+        return
+        
+    upload_option = st.radio("Select input method:", 
+                           ("Upload Image", "Take Photo"))
+
+    if upload_option == "Upload Image":
+        uploaded_file = st.file_uploader("Choose traffic sign image", 
+                                       type=["jpg", "jpeg", "png"])
         if uploaded_file:
-            image = Image.open(uploaded_file)
-            st.image(image, caption="Uploaded Image", use_column_width=True)
-            
-            # Process image
-            processed = preprocess_image(image)
-            prediction = model.predict(processed)
-            class_idx = np.argmax(prediction)
-            confidence = prediction[0][class_idx]
-            
-            if confidence > CONFIDENCE_THRESHOLD:
-                sign_name = CLASS_LABELS.get(class_idx, "Unknown sign")
-                st.success(f"Detected: {sign_name} (Confidence: {confidence:.2%})")
-                voice_alert(sign_name)
-            else:
-                st.warning(f"Uncertain detection (Confidence: {confidence:.2%})")
+            process_image(Image.open(uploaded_file))
+    else:
+        img_file = st.camera_input("Take a photo of traffic sign")
+        if img_file:
+            process_image(Image.open(img_file))
+
+def process_image(image):
+    st.image(image, caption="Input Image", use_column_width=True)
     
-    with tab2:
-        st.info("Note: Camera access requires permission in your browser")
-        image = get_webcam_frame()
-        if image:
-            # Process camera image
-            processed = preprocess_image(image)
+    processed = preprocess_image(image)
+    if processed is None:
+        return
+        
+    with st.spinner("Analyzing..."):
+        try:
             prediction = model.predict(processed)
             class_idx = np.argmax(prediction)
             confidence = prediction[0][class_idx]
             
-            if confidence > CONFIDENCE_THRESHOLD:
+            if confidence > 0.8:  # 80% confidence threshold
                 sign_name = CLASS_LABELS.get(class_idx, "Unknown sign")
-                st.success(f"Detected: {sign_name} (Confidence: {confidence:.2%})")
+                st.success(f"Detected: {sign_name} ({confidence:.1%} confidence)")
                 voice_alert(sign_name)
             else:
-                st.warning(f"Uncertain detection (Confidence: {confidence:.2%})")
+                st.warning(f"Low confidence detection ({confidence:.1%})")
+        except Exception as e:
+            st.error(f"Prediction error: {str(e)}")
 
 if __name__ == "__main__":
     main()
