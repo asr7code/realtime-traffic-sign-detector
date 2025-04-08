@@ -1,9 +1,7 @@
 streamlit
-streamlit-webrtc
-opencv-python
-numpy
-pyttsx3 
-Pillow
-opencv-python-headless
-scikit-learn
 tensorflow==2.18.0
+opencv-python-headless
+numpy
+Pillow
+h5py
+scikit-learn
