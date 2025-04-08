@@ -6,3 +6,4 @@ numpy
 pyttsx3 
 Pillow
 opencv-python-headless
+scikit-learn
