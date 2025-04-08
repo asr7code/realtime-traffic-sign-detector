@@ -1,5 +1,5 @@
-opencv-python
+gradio
 tensorflow
+opencv-python
 numpy
-Pillow
 pyttsx3
