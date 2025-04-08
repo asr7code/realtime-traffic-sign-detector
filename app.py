@@ -1,40 +1,100 @@
-from flask import Flask, render_template, request, jsonify
-import base64
-import cv2
+import streamlit as st
 import numpy as np
-from tensorflow.keras.models import load_model
-import pickle
-from io import BytesIO
-import re
+import tensorflow as tf
+from PIL import Image
+import cv2
+import time
+from threading import Thread
+import queue
 
-app = Flask(__name__)
+# 🚦 Page Config
+st.set_page_config(page_title="Traffic Sign Alert", layout="centered")
 
-model = load_model('model/best_model.h5')
-with open('model/label_binarizer.pkl', 'rb') as f:
-    lb = pickle.load(f)
+# 📌 Class Labels (same as your original)
+CLASS_LABELS = {
+    0: "Speed limit 20 km per hour",
+    # ... (keep all your existing labels)
+    42: "End of no passing by vehicles over 3.5 tons"
+}
 
-@app.route('/')
-def index():
-    return render_template('index.html')
+# 📦 Model Loading
+@st.cache_resource
+def load_model():
+    return tf.keras.models.load_model('best_model.h5')
 
-@app.route('/predict', methods=['POST'])
-def predict():
-    data = request.get_json()
-    image_data = data['image']
-    image_data = re.sub('^data:image/.+;base64,', '', image_data)
-    image = base64.b64decode(image_data)
-    nparr = np.frombuffer(image, np.uint8)
-    frame = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+model = load_model()
 
-    # Resize and preprocess
-    resized = cv2.resize(frame, (32, 32))
-    resized = resized.astype('float32') / 255.0
-    resized = np.expand_dims(resized, axis=0)
+# 🖼️ Image Processing
+def preprocess_image(image):
+    image = np.array(image.convert('RGB'))
+    image = cv2.resize(image, (64, 64))
+    image = image.astype('float32') / 255.0
+    return np.expand_dims(image, axis=0)
 
-    preds = model.predict(resized)
-    label = lb.classes_[np.argmax(preds)]
+# 🗣️ Browser-Based Voice Alert
+def voice_alert(text):
+    js = f"""
+    <script>
+    if ('speechSynthesis' in window) {{
+        var msg = new SpeechSynthesisUtterance("Warning: {text}");
+        window.speechSynthesis.speak(msg);
+    }}
+    </script>
+    """
+    st.components.v1.html(js, height=0)
 
-    return jsonify({'prediction': label})
+# 📹 Webcam Capture (for browsers that support it)
+def get_webcam_frame():
+    img_file_buffer = st.camera_input("Take a picture of traffic sign")
+    if img_file_buffer is not None:
+        return Image.open(img_file_buffer)
+    return None
 
-if __name__ == '__main__':
-    app.run(debug=True)
+# 🎚️ Confidence Threshold
+CONFIDENCE_THRESHOLD = 0.85
+
+# 🖥️ Main UI
+def main():
+    st.title("🚦 Traffic Sign Recognition")
+    st.write("Upload an image or use your camera to detect traffic signs")
+    
+    tab1, tab2 = st.tabs(["📁 Upload Image", "📷 Use Camera"])
+    
+    with tab1:
+        uploaded_file = st.file_uploader("Choose traffic sign image", type=["jpg", "jpeg", "png"])
+        if uploaded_file:
+            image = Image.open(uploaded_file)
+            st.image(image, caption="Uploaded Image", use_column_width=True)
+            
+            # Process image
+            processed = preprocess_image(image)
+            prediction = model.predict(processed)
+            class_idx = np.argmax(prediction)
+            confidence = prediction[0][class_idx]
+            
+            if confidence > CONFIDENCE_THRESHOLD:
+                sign_name = CLASS_LABELS.get(class_idx, "Unknown sign")
+                st.success(f"Detected: {sign_name} (Confidence: {confidence:.2%})")
+                voice_alert(sign_name)
+            else:
+                st.warning(f"Uncertain detection (Confidence: {confidence:.2%})")
+    
+    with tab2:
+        st.info("Note: Camera access requires permission in your browser")
+        image = get_webcam_frame()
+        if image:
+            # Process camera image
+            processed = preprocess_image(image)
+            prediction = model.predict(processed)
+            class_idx = np.argmax(prediction)
+            confidence = prediction[0][class_idx]
+            
+            if confidence > CONFIDENCE_THRESHOLD:
+                sign_name = CLASS_LABELS.get(class_idx, "Unknown sign")
+                st.success(f"Detected: {sign_name} (Confidence: {confidence:.2%})")
+                voice_alert(sign_name)
+            else:
+                st.warning(f"Uncertain detection (Confidence: {confidence:.2%})")
+
+if __name__ == "__main__":
+    main()
