@@ -1,55 +1,57 @@
 import streamlit as st
-import cv2
-import numpy as np
-import tensorflow as tf
-import pickle
-from streamlit_webrtc import webrtc_streamer, VideoProcessorBase
-from PIL import Image
+from streamlit_webrtc import webrtc_streamer, VideoTransformerBase
 import av
+import tensorflow as tf
+import numpy as np
+import cv2
+import pickle
+from PIL import Image
 
 # Load the trained model and label binarizer
-model = tf.keras.models.load_model("best_model.h5")
+model = tf.keras.models.load_model("best_model.keras")
+
 with open("label_binarizer.pkl", "rb") as f:
     lb = pickle.load(f)
 
-# Voice alert using browser JS (only works online)
-def speak(label):
-    js_code = f'''
-        <script>
-            var msg = new SpeechSynthesisUtterance("{label}");
-            window.speechSynthesis.speak(msg);
-        </script>
-    '''
-    st.components.v1.html(js_code)
-
-# Title
-st.set_page_config(page_title="Real-Time Traffic Sign Detection", layout="centered")
+# Streamlit page config
+st.set_page_config(page_title="Real-Time Traffic Sign Detector", layout="centered")
 st.title("🚦 Real-Time Traffic Sign Recognition")
-st.markdown("Show a traffic sign to your camera and it will recognize and speak the name!")
+st.markdown("Show a traffic sign in front of your webcam and it will recognize it!")
 
-# Define the video processor
-class VideoProcessor(VideoProcessorBase):
+# Define Video Transformer
+class TrafficSignDetector(VideoTransformerBase):
     def __init__(self):
-        self.last_label = None
+        self.result = None
 
-    def recv(self, frame: av.VideoFrame) -> av.VideoFrame:
+    def transform(self, frame):
         img = frame.to_ndarray(format="bgr24")
-        img_resized = cv2.resize(img, (30, 30)) / 255.0
-        img_expanded = np.expand_dims(img_resized, axis=0)
+        img_resized = cv2.resize(img, (30, 30))  # Resize to model input
+        img_array = np.expand_dims(img_resized, axis=0) / 255.0
 
-        preds = model.predict(img_expanded)
-        pred_idx = np.argmax(preds)
-        label = lb.classes_[pred_idx]
+        # Predict
+        prediction = model.predict(img_array)
+        class_index = np.argmax(prediction)
+        class_name = lb.classes_[class_index]
+        confidence = prediction[0][class_index]
 
-        # Show prediction on the video frame
-        cv2.putText(img, f"{label}", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
+        # Save result to show below
+        self.result = f"{class_name} ({confidence*100:.2f}%)"
 
-        # Only speak if the label changed
-        if label != self.last_label:
-            self.last_label = label
-            speak(label)
+        # Draw on frame
+        cv2.putText(img, class_name, (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
 
-        return av.VideoFrame.from_ndarray(img, format="bgr24")
+        return img
 
-# Start webcam stream
-webrtc_streamer(key="traffic-detect", video_processor_factory=VideoProcessor)
+# Initialize and start webcam
+webrtc_ctx = webrtc_streamer(
+    key="example",
+    video_transformer_factory=TrafficSignDetector,
+    media_stream_constraints={"video": True, "audio": False},
+    async_transform=True,
+)
+
+# Show results if available
+if webrtc_ctx.video_transformer:
+    result = webrtc_ctx.video_transformer.result
+    if result:
+        st.success(f"Detected Sign: **{result}**")
