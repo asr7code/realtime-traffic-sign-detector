@@ -1,9 +1,9 @@
 streamlit
 streamlit-webrtc
 opencv-python
-tensorflow
 numpy
 pyttsx3 
 Pillow
 opencv-python-headless
 scikit-learn
+tensorflow==2.12.0
