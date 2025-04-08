@@ -1,5 +1,7 @@
-gradio
-tensorflow
+streamlit
+streamlit-webrtc
 opencv-python
+tensorflow
 numpy
-pyttsx3
+pyttsx3 ; only works locally
+Pillow
