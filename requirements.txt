@@ -5,3 +5,4 @@ tensorflow
 numpy
 pyttsx3 
 Pillow
+opencv-python-headless
